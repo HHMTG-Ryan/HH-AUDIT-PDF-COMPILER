@@ -197,32 +197,55 @@
     return new Blob([bytes], {type:'application/pdf'});
   }
 
-  async function mergePDFs(parts, summaryBlob, outName){
+async function mergePDFs(parts, summaryBlob, outName){
+  const { PDFDocument } = PDFLib;
+
+  // small helper that retries with ignoreEncryption
+  async function loadPdfOrIgnore(bytes) {
     try {
-      const { PDFDocument } = PDFLib;
-      const out = await PDFDocument.create();
-
-      if(summaryBlob){
-        const sumBytes = await summaryBlob.arrayBuffer();
-        const sumDoc = await PDFDocument.load(sumBytes);
-        const pages = await out.copyPages(sumDoc, sumDoc.getPageIndices());
-        pages.forEach(p=> out.addPage(p));
-      }
-
-      for(const file of parts){
-        const bytes = await file.arrayBuffer();
-        const src = await PDFDocument.load(bytes);
-        const pages = await out.copyPages(src, src.getPageIndices());
-        pages.forEach(p=> out.addPage(p));
-      }
-
-      const outBytes = await out.save();
-      downloadBlob(new Blob([outBytes], {type:'application/pdf'}), outName);
+      return await PDFDocument.load(bytes); // normal load first
     } catch (e) {
-      console.error(e); log('Merge error: ' + (e && e.message ? e.message : e));
-      throw e;
+      try {
+        return await PDFDocument.load(bytes, { ignoreEncryption: true }); // tolerant load
+      } catch (e2) {
+        throw e2; // bubble up so we can log/skip
+      }
     }
   }
+
+  try {
+    const out = await PDFDocument.create();
+
+    // Add summary first (if present)
+    if (summaryBlob) {
+      const sumBytes = await summaryBlob.arrayBuffer();
+      const sumDoc = await loadPdfOrIgnore(sumBytes);
+      const pages = await out.copyPages(sumDoc, sumDoc.getPageIndices());
+      pages.forEach(p => out.addPage(p));
+    }
+
+    // Add all source PDFs
+    for (const file of parts) {
+      try {
+        const bytes = await file.arrayBuffer();
+        const src = await loadPdfOrIgnore(bytes);
+        const pages = await out.copyPages(src, src.getPageIndices());
+        pages.forEach(p => out.addPage(p));
+      } catch (e) {
+        console.error(e);
+        log(`Merge warning: skipped encrypted or unreadable file → ${file.name}`);
+        // continue; skip this file but keep merging others
+      }
+    }
+
+    const outBytes = await out.save();
+    downloadBlob(new Blob([outBytes], { type: 'application/pdf' }), outName);
+  } catch (e) {
+    console.error(e);
+    log('Merge error: ' + (e?.message || e));
+    throw e;
+  }
+}
 
   function downloadBlob(blob, name){
     const a = document.createElement('a');
