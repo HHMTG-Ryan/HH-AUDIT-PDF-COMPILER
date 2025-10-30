@@ -61,14 +61,15 @@
       <div>
         <h3 style="margin:4px 0 10px;">Actions</h3>
         <div class="row" style="margin-bottom:8px;">
-          <button id="buildClosing" class="btn primary" disabled>⚙️ Build Closing Docs (PDF)</button>
+          <button id="runAll" class="btn primary" disabled>🚀 Run All (Closing → Funding 1 → Client Pkg → ZIP)</button>
+          <button id="buildClosing" class="btn" disabled>⚙️ Build Closing Docs (PDF)</button>
           <button id="buildFunding1" class="btn" disabled>📄 Build Funding Docs 1 (PDF)</button>
         </div>
         <div class="row">
           <button id="buildClientPkg" class="btn" disabled>👪 Build Client Closing Package (PDF)</button>
           <button id="zipFD2" class="btn" disabled>🗜️ Download “Funding Docs 2”.zip</button>
         </div>
-        <p class="small muted">All processing is in‑memory. Files never leave your device. Close the tab to clear memory.</p>
+        <p class="small muted">All processing is in‑memory. Files never leave your device. Close the tab to clear memory. If your browser blocks multiple downloads, allow them for this site the first time you use <b>Run All</b>.</p>
       </div>
     </div>
 
@@ -117,7 +118,7 @@
 
   function indexFiles(files){
     pickedMap.clear();
-    const pdfs = [...files].filter(f=>f.type==="application/pdf" || f.name.toLowerCase().endsWith('.pdf'));
+    const pdfs = [...files].filter(f=> f.name.toLowerCase().endsWith('.pdf'));
     pdfs.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
     pickedFiles = pdfs;
     for(const f of pdfs){ const n = norm(f.name); if(!pickedMap.has(n)) pickedMap.set(n,[]); pickedMap.get(n).push(f); }
@@ -177,13 +178,6 @@
       ul.appendChild(li);
     }
     root.appendChild(ul);
-
-    // Enable actions if we have any PDFs
-    const has = pickedFiles.length>0;
-    $('#buildClosing').disabled = !has;
-    $('#buildFunding1').disabled = !has;
-    $('#buildClientPkg').disabled = !has;
-    $('#zipFD2').disabled = !has;
   }
 
   async function makeSummaryPDF(title, lines){
@@ -204,32 +198,38 @@
   }
 
   async function mergePDFs(parts, summaryBlob, outName){
-    const { PDFDocument } = PDFLib;
-    const out = await PDFDocument.create();
+    try {
+      const { PDFDocument } = PDFLib;
+      const out = await PDFDocument.create();
 
-    if(summaryBlob){
-      const sumBytes = await summaryBlob.arrayBuffer();
-      const sumDoc = await PDFDocument.load(sumBytes);
-      const pages = await out.copyPages(sumDoc, sumDoc.getPageIndices());
-      pages.forEach(p=> out.addPage(p));
+      if(summaryBlob){
+        const sumBytes = await summaryBlob.arrayBuffer();
+        const sumDoc = await PDFDocument.load(sumBytes);
+        const pages = await out.copyPages(sumDoc, sumDoc.getPageIndices());
+        pages.forEach(p=> out.addPage(p));
+      }
+
+      for(const file of parts){
+        const bytes = await file.arrayBuffer();
+        const src = await PDFDocument.load(bytes);
+        const pages = await out.copyPages(src, src.getPageIndices());
+        pages.forEach(p=> out.addPage(p));
+      }
+
+      const outBytes = await out.save();
+      downloadBlob(new Blob([outBytes], {type:'application/pdf'}), outName);
+    } catch (e) {
+      console.error(e); log('Merge error: ' + (e && e.message ? e.message : e));
+      throw e;
     }
-
-    for(const file of parts){
-      const bytes = await file.arrayBuffer();
-      const src = await PDFDocument.load(bytes);
-      const pages = await out.copyPages(src, src.getPageIndices());
-      pages.forEach(p=> out.addPage(p));
-    }
-
-    const outBytes = await out.save();
-    downloadBlob(new Blob([outBytes], {type:'application/pdf'}), outName);
   }
 
   function downloadBlob(blob, name){
     const a = document.createElement('a');
     const url = URL.createObjectURL(blob);
     a.href = url; a.download = name; document.body.appendChild(a); a.click();
-    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
+    // give the browser time to start the download before revoking the URL
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
   }
 
   async function buildClosing(){
@@ -242,13 +242,17 @@
   }
 
   async function buildFunding1(){
-    log('Building Funding Docs 1...');
-    // All PDFs except ones we generate on the fly (we only see picked ones)
-    const files = pickedFiles.filter(f=> !/^_summary/i.test(f.name));
-    const names = files.map(f=>f.name).sort();
-    const summaryBlob = await makeSummaryPDF('Funding Docs', names);
-    await mergePDFs(files, summaryBlob, folderPrefix()+" - Funding Docs 1.pdf");
-    log('Funding Docs 1 ready.');
+    try {
+      log('Building Funding Docs 1...');
+      if(pickedFiles.length === 0){ log('No PDFs selected.'); return; }
+      const files = pickedFiles.filter(f=> /\.pdf$/i.test(f.name));
+      const names = files.map(f=>f.name).sort();
+      const summaryBlob = await makeSummaryPDF('Funding Docs', names);
+      await mergePDFs(files, summaryBlob, folderPrefix()+" - Funding Docs 1.pdf");
+      log('Funding Docs 1 ready.');
+    } catch (e) {
+      console.error(e); log('Error building Funding Docs 1: ' + (e && e.message ? e.message : e));
+    }
   }
 
   async function buildClientPkg(){
@@ -282,16 +286,31 @@
   }
 
   async function downloadFD2Zip(){
-    log('Preparing Funding Docs 2.zip ...');
-    const v = listCandidates();
-    const zip = new JSZip();
-    const dir = zip.folder('Funding Docs 2');
-    // Move used + any summary (we only have used; summary pages are generated in build funcs)
-    const usedSet = new Set(v.resUsed);
-    for(const f of usedSet){ const buf = await f.arrayBuffer(); dir.file(f.name, buf); }
-    const blob = await zip.generateAsync({type:'blob'});
-    downloadBlob(blob, folderPrefix()+" - Funding Docs 2.zip");
-    log('ZIP ready.');
+    try {
+      log('Preparing Funding Docs 2.zip ...');
+      const v = listCandidates();
+      const zip = new JSZip();
+      const dir = zip.folder('Funding Docs 2');
+      const usedSet = new Set(v.resUsed);
+      for(const f of usedSet){ const buf = await f.arrayBuffer(); dir.file(f.name, buf); }
+      const blob = await zip.generateAsync({type:'blob'});
+      downloadBlob(blob, folderPrefix()+" - Funding Docs 2.zip");
+      log('ZIP ready.');
+    } catch(e){ console.error(e); log('ZIP error: ' + (e && e.message ? e.message : e)); }
+  }
+
+  async function runAll(){
+    try {
+      if(pickedFiles.length===0){ log('No PDFs selected.'); return; }
+      log('Running all steps...');
+      await buildClosing();
+      await buildFunding1();
+      await buildClientPkg();
+      await downloadFD2Zip();
+      log('All steps completed. If you didn\'t receive multiple files, enable multiple downloads for this site.');
+    } catch(e) {
+      console.error(e); log('Run All error: ' + (e && e.message ? e.message : e));
+    }
   }
 
   function folderPrefix(){
@@ -302,13 +321,18 @@
     return segs.length? segs[0] : 'Client';
   }
 
+  function setActionsEnabled(enabled){
+    ['buildClosing','buildFunding1','buildClientPkg','zipFD2','runAll'].forEach(id=>{ const b=$('#'+id); if(b) b.disabled = !enabled; });
+  }
+
   // ======= UI Events =======
-  $('#pick').addEventListener('change', (e)=>{ indexFiles(e.target.files); renderSlots(listCandidates()); });
-  $('#scanBtn').addEventListener('click', ()=>{ if(pickedFiles.length===0) return; renderSlots(listCandidates()); log('Analysis updated.'); });
+  $('#pick').addEventListener('change', (e)=>{ indexFiles(e.target.files); const v=listCandidates(); renderSlots(v); log('Analysis updated.'); setActionsEnabled(pickedFiles.length>0); });
+  $('#scanBtn').addEventListener('click', ()=>{ if(pickedFiles.length===0) return; const v=listCandidates(); renderSlots(v); log('Analysis updated.'); });
   $('#buildClosing').addEventListener('click', buildClosing);
   $('#buildFunding1').addEventListener('click', buildFunding1);
   $('#buildClientPkg').addEventListener('click', buildClientPkg);
   $('#zipFD2').addEventListener('click', downloadFD2Zip);
+  $('#runAll').addEventListener('click', runAll);
 
   // Drag & drop folder support (Chrome-based)
   window.addEventListener('dragover', e=>{ e.preventDefault(); });
@@ -327,7 +351,7 @@
       };
       walk(entry); setTimeout(()=> res(acc), 300); // small delay to gather
     }));
-    Promise.all(promises).then(groups=>{ const all = groups.flat(); indexFiles(all); renderSlots(listCandidates()); });
+    Promise.all(promises).then(groups=>{ const all = groups.flat(); indexFiles(all); const v=listCandidates(); renderSlots(v); setActionsEnabled(pickedFiles.length>0); });
   });
   </script>
 </body>
