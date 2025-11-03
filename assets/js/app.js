@@ -23,10 +23,10 @@ const SYNONYMS = {
 };
 
 // ======= State / utils =======
-let pickedFiles = [];                // File[] from selection/drag
-let pickedMap = new Map();           // normalized name -> File[]
-let dirHandle = null;                // File System Access API directory handle
-let lastClosingUsedNames = new Set();// what Closing merged (by filename)
+let pickedFiles = [];
+let pickedMap = new Map();
+let dirHandle = null;
+let lastClosingUsedNames = new Set();
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const $ = (sel) => document.querySelector(sel);
@@ -39,7 +39,7 @@ function setStatus(text, state='running'){
   const el = document.getElementById('status');
   if(!el) return;
   el.removeAttribute('hidden');
-  el.dataset.state = state; // running | ready | error
+  el.dataset.state = state;
   const txt = el.querySelector('.status-text'); if(txt) txt.textContent = text || '';
   const spin = el.querySelector('.spinner'); if(spin) spin.style.display = (state === 'running') ? 'inline-block' : 'none';
 }
@@ -175,7 +175,6 @@ function listCandidates(){
       else { summary.push(`${DISPLAY_NAMES[slot]||slot}: MISSING`); }
     }
   }
-  // de-dup resUsed globally
   const seenUsed = new Set(); const resUsedUniq=[];
   for(const f of resUsed){ if(!seenUsed.has(f.name)){ seenUsed.add(f.name); resUsedUniq.push(f); } }
   return {slotDocs, resUsed: resUsedUniq, summary};
@@ -218,7 +217,6 @@ async function mergePDFs(parts, summaryBlob, outName, writeToFolder=false){
       pages.forEach(p=> out.addPage(p));
     }
 
-    // de-dup parts by filename before merging
     const seen = new Set(); const uniqueParts=[];
     for(const f of parts){ if(!seen.has(f.name)){ seen.add(f.name); uniqueParts.push(f); } }
 
@@ -262,7 +260,6 @@ async function makeSummaryPDF(title, lines){
   const page = doc.addPage([612, 792]); // Letter
   const font = await doc.embedFont(StandardFonts.Helvetica);
 
-  // darker, high-contrast cover text
   page.drawText(title, { x:54, y:740, size:20, font, color: rgb(0.1,0.15,0.2) });
   let y = 710;
   for(const line of lines){
@@ -276,7 +273,6 @@ async function makeSummaryPDF(title, lines){
 
 // ======= Output naming =======
 function folderPrefix(){
-  // Prefer the picked directory name when write mode is on
   let raw = (typeof dirHandle?.name === 'string' && dirHandle.name)
     ? dirHandle.name
     : (() => {
@@ -287,11 +283,7 @@ function folderPrefix(){
       })();
 
   raw = (raw || '').trim();
-
-  // Take ONLY the first "word" (letters/numbers), splitting on any non-alphanumeric separator
   const parts = raw.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-
-  // Fallback if we can’t parse something sensible
   return parts.length ? parts[0] : 'Client';
 }
 
@@ -302,7 +294,6 @@ async function buildClosing(){
   const v = listCandidates();
   const summaryBlob = await makeSummaryPDF('Closing Docs', v.summary);
 
-  // build parts without duplicates across slots
   const parts = (()=>{ 
     const seen=new Set(); const out=[];
     for(const slot of CLOSING_ORDER){
@@ -315,7 +306,6 @@ async function buildClosing(){
 
   await mergePDFs(parts, summaryBlob, outName, !!dirHandle);
 
-  // Track used in Closing to exclude from FD1
   lastClosingUsedNames = new Set(parts.map(f=>f.name));
 
   if(dirHandle){
@@ -337,21 +327,17 @@ async function buildFunding1(){
     let files;
 
     if (dirHandle) {
-      // Names to exclude (outputs we generate)
       const exclude = new Set([
         (folderPrefix()+" - Closing Docs.pdf").toLowerCase(),
         (folderPrefix()+" - Funding Docs 1.pdf").toLowerCase(),
         (folderPrefix()+" - Closing Package (for Client).pdf").toLowerCase()
       ]);
 
-      // Only read top-level PDFs for FD1 inputs (leftovers after Closing)
       const topLevel = await readTopLevelPDFsFromFS();
 
-      // Pre-move any Signing Package/Pkg files (top-level only) to FD2 so they never enter FD1
       const signersTop = topLevel.filter(f => signingRe.test(f.name));
       if (signersTop.length) for (const f of signersTop) await moveFileToFD2ByName(f.name);
 
-      // Leftovers = top-level PDFs not summaries, not outputs, not signing pkg, not used by Closing
       files = topLevel.filter(f =>
         !f.name.toLowerCase().startsWith('_summary') &&
         !exclude.has(f.name.toLowerCase()) &&
@@ -359,7 +345,6 @@ async function buildFunding1(){
         !(lastClosingUsedNames && lastClosingUsedNames.has(f.name))
       );
     } else {
-      // No write mode: use selected files, simulate leftovers by excluding Closing set and our generated names
       const exclude = new Set([
         (folderPrefix()+" - Closing Docs.pdf").toLowerCase(),
         (folderPrefix()+" - Funding Docs 1.pdf").toLowerCase(),
@@ -373,7 +358,6 @@ async function buildFunding1(){
       );
     }
 
-    // De-dup by filename
     const seen = new Set();
     files = files.filter(f => !seen.has(f.name) && seen.add(f.name));
 
@@ -385,7 +369,6 @@ async function buildFunding1(){
     await mergePDFs(files, summaryBlob, outName, !!dirHandle);
 
     if (dirHandle) {
-      // Save summary then move the exact FD1 inputs (top-level leftovers) into FD2
       const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
       await writeFile(fd2, `_summary_funding_docs.pdf`, summaryBlob);
       for (const f of files) await moveFileToFD2ByName(f.name);
@@ -455,7 +438,6 @@ async function downloadFD2Zip(){
     const zip = new JSZip();
     if(dirHandle){
       const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
-      // Natural-sort by name for audit sanity
       const files = [];
       for await (const [name, handle] of fd2.entries()){
         if(handle.kind==='file'){
@@ -493,7 +475,6 @@ async function downloadFD2Zip(){
 async function runAll(){
   try {
     if(pickedFiles.length===0){ log('No PDFs selected.'); return; }
-    // Disable FS button when unsupported
     if(!('showDirectoryPicker' in window)){
       const b = document.getElementById('grantFs');
       if(b){ b.disabled = true; b.title = 'Use Chrome/Edge for write mode'; }
@@ -550,12 +531,10 @@ function bindUI() {
   document.getElementById('zipFD2').addEventListener('click', downloadFD2Zip);
   document.getElementById('runAll').addEventListener('click', runAll);
 
-  // Initial state
   setActionsEnabled(false);
   log('Ready. Select a folder to begin.');
 }
 
-// Bind after DOM is parsed, regardless of script loading details
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', bindUI);
 } else {
@@ -567,20 +546,36 @@ window.addEventListener('dragover', e=>{ e.preventDefault(); });
 window.addEventListener('drop', e=>{
   e.preventDefault();
   const items = e.dataTransfer.items; if(!items) return;
+
   const entries = [];
-  for(const it of items){ const entry = it.webkitGetAsEntry?.(); if(entry) entries.push(entry); }
-  const promises = entries.map(entry => new Promise(res=>{
+  for (const it of items) {
+    const entry = it.webkitGetAsEntry?.();
+    if (entry) entries.push(entry);
+  }
+
+  const promises = entries.map(entry => new Promise(res => {
     const acc = [];
-    const walk = (ent, path='')=>{
-      if(ent.isFile){ ent.file(f=>{ f.webkitRelativePath = path + f.name; acc.push(f); }, ()=>{}); }
-      else if(ent.isDirectory){ const reader = ent.createReader();
-        reader.readEntries(ents=>{ ents.forEach(ch=> walk(ch, path + ent.name + '/')); }, ()=>{}); }
-      };
-    walk(entry); setTimeout(()=> res(acc), 300);
+
+    const walk = (ent, path='') => {
+      if (ent.isFile) {
+        ent.file(f => { f.webkitRelativePath = path + f.name; acc.push(f); }, ()=>{});
+      } else if (ent.isDirectory) {
+        const reader = ent.createReader();
+        reader.readEntries(ents => {
+          ents.forEach(ch => walk(ch, path + ent.name + '/'));
+        }, ()=>{});
+      }
+    };
+
+    walk(entry);
+    setTimeout(() => res(acc), 300);
   }));
-  Promise.all(promises).then(groups=>{
-    const all = groups.flat(); indexFiles(all);
-    const v=listCandidates(); renderSlots(v);
-    setActionsEnabled(pickedFiles.length>0);
+
+  Promise.all(promises).then(groups => {
+    const all = groups.flat();
+    indexFiles(all);
+    const v = listCandidates();
+    renderSlots(v);
+    setActionsEnabled(pickedFiles.length > 0);
   });
 });
