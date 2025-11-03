@@ -22,15 +22,15 @@ const SYNONYMS = {
   "amortization":["amortization","amortisation","amort sched","amort schedule"],
 };
 
-// ======= State =======
-let pickedFiles = []; // File[] from selection/drag
-let pickedMap = new Map(); // normalized name -> File[]
-let dirHandle = null; // File System Access API directory handle
-let lastClosingUsedNames = new Set(); // track what Closing actually merged (by filename)
+// ======= State / utils =======
+let pickedFiles = [];                // File[] from selection/drag
+let pickedMap = new Map();           // normalized name -> File[]
+let dirHandle = null;                // File System Access API directory handle
+let lastClosingUsedNames = new Set();// what Closing merged (by filename)
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const $ = (sel) => document.querySelector(sel);
-const log = (m) => { const el=$('#log'); el.textContent += m +"\n"; el.scrollTop = el.scrollHeight; };
+const log = (m) => { const el=$('#log'); if(el){ el.textContent += m + "\n"; el.scrollTop = el.scrollHeight; } };
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const natKey = (s) => s.toLowerCase().split(/(\d+)/).map(t=>/^\d+$/.test(t)?Number(t):t);
 
@@ -40,15 +40,14 @@ function setStatus(text, state='running'){
   if(!el) return;
   el.removeAttribute('hidden');
   el.dataset.state = state; // running | ready | error
-  el.querySelector('.status-text').textContent = text;
-  const spin = el.querySelector('.spinner');
-  if(spin) spin.style.display = (state === 'running') ? 'inline-block' : 'none';
+  const txt = el.querySelector('.status-text'); if(txt) txt.textContent = text || '';
+  const spin = el.querySelector('.spinner'); if(spin) spin.style.display = (state === 'running') ? 'inline-block' : 'none';
 }
 function clearStatus(){
   const el = document.getElementById('status');
   if(!el) return;
   el.dataset.state = 'ready';
-  el.querySelector('.status-text').textContent = '';
+  const txt = el.querySelector('.status-text'); if(txt) txt.textContent = '';
   el.setAttribute('hidden','');
 }
 
@@ -83,7 +82,11 @@ async function readTopLevelPDFsFromFS(){
       files.push(f);
     }
   }
-  files.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
+  files.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name);
+    for(let i=0;i<Math.max(ak.length,bk.length);i++){
+      if(ak[i]==null) return -1; if(bk[i]==null) return 1;
+      if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1;
+    } return 0; });
   return files;
 }
 async function moveFileToFD2ByName(name){
@@ -121,10 +124,18 @@ async function readBytesSmart(file){
 function indexFiles(files){
   pickedMap.clear();
   const pdfs = [...files].filter(f=> f.name.toLowerCase().endsWith('.pdf'));
-  pdfs.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i)<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
+  pdfs.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name);
+    for(let i=0;i<Math.max(ak.length,bk.length);i++){
+      if(ak[i]==null) return -1; if(bk[i]==null) return 1;
+      if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1;
+    } return 0; });
   pickedFiles = pdfs;
-  for(const f of pdfs){ const n = norm(f.name); if(!pickedMap.has(n)) pickedMap.set(n,[]); pickedMap.get(n).push(f); }
-  $('#selInfo').textContent = `${pdfs.length} PDF(s) selected`;
+  for(const f of pdfs){
+    const n = norm(f.name);
+    if(!pickedMap.has(n)) pickedMap.set(n,[]);
+    pickedMap.get(n).push(f);
+  }
+  const sel = $('#selInfo'); if(sel) sel.textContent = `${pdfs.length} PDF(s) selected`;
   log(`Indexed ${pdfs.length} PDFs.`);
 }
 
@@ -171,12 +182,14 @@ function listCandidates(){
 }
 
 function renderSlots(view){
-  const root = $('#slots'); root.innerHTML = '';
+  const root = $('#slots'); if(!root) return;
+  root.innerHTML = '';
   const ul = document.createElement('ul'); ul.className = 'inline';
   for(const slot of CLOSING_ORDER){
     const arr = view.slotDocs.get(slot) || [];
     const li = document.createElement('li'); li.className='pill';
-    const ok = arr.length>0; li.innerHTML = `<span class="${ok? 'ok':'miss'}">${ok? '✔':'✖'}</span> <b>${DISPLAY_NAMES[slot]||slot}</b>${ ok? ` · ${arr.length} file(s)` : ''}`;
+    const ok = arr.length>0;
+    li.innerHTML = `<span class="${ok? 'ok':'miss'}">${ok? '✔':'✖'}</span> <b>${DISPLAY_NAMES[slot]||slot}</b>${ ok? ` · ${arr.length} file(s)` : ''}`;
     ul.appendChild(li);
   }
   root.appendChild(ul);
@@ -184,6 +197,10 @@ function renderSlots(view){
 
 // ======= PDF helpers (encryption tolerant) =======
 async function mergePDFs(parts, summaryBlob, outName, writeToFolder=false){
+  if (typeof window.PDFLib === 'undefined') {
+    const msg = 'PDFLib not loaded. Check vendor path/order.';
+    console.error(msg); log(msg); throw new Error(msg);
+  }
   const { PDFDocument } = PDFLib;
 
   async function loadPdf(bytes){
@@ -236,6 +253,10 @@ function downloadBlob(blob, name){
 }
 
 async function makeSummaryPDF(title, lines){
+  if (typeof window.PDFLib === 'undefined') {
+    const msg = 'PDFLib not loaded. Check vendor path/order.';
+    console.error(msg); log(msg); throw new Error(msg);
+  }
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
   const doc = await PDFDocument.create();
   const page = doc.addPage([612, 792]); // Letter
@@ -253,6 +274,7 @@ async function makeSummaryPDF(title, lines){
   return new Blob([bytes], {type:'application/pdf'});
 }
 
+// ======= Output naming =======
 function folderPrefix(){
   // Prefer the picked directory name when write mode is on
   let raw = (typeof dirHandle?.name === 'string' && dirHandle.name)
@@ -267,7 +289,6 @@ function folderPrefix(){
   raw = (raw || '').trim();
 
   // Take ONLY the first "word" (letters/numbers), splitting on any non-alphanumeric separator
-  // Uses Unicode-aware class to be safe with names containing accents.
   const parts = raw.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
   // Fallback if we can’t parse something sensible
@@ -280,13 +301,21 @@ async function buildClosing(){
   log('Building Closing Docs...');
   const v = listCandidates();
   const summaryBlob = await makeSummaryPDF('Closing Docs', v.summary);
+
   // build parts without duplicates across slots
-  const parts = (()=>{ const seen=new Set(); const out=[]; for(const slot of CLOSING_ORDER){ const arr=v.slotDocs.get(slot)||[]; for(const f of arr){ if(!seen.has(f.name)){ seen.add(f.name); out.push(f); } } } return out; })();
+  const parts = (()=>{ 
+    const seen=new Set(); const out=[];
+    for(const slot of CLOSING_ORDER){
+      const arr=v.slotDocs.get(slot)||[];
+      for(const f of arr){ if(!seen.has(f.name)){ seen.add(f.name); out.push(f); } }
+    }
+    return out;
+  })();
   const outName = folderPrefix()+" - Closing Docs.pdf";
 
   await mergePDFs(parts, summaryBlob, outName, !!dirHandle);
 
-  // Track what we used in Closing (by filename) to exclude from Funding1 (extra safety)
+  // Track used in Closing to exclude from FD1
   lastClosingUsedNames = new Set(parts.map(f=>f.name));
 
   if(dirHandle){
@@ -320,9 +349,7 @@ async function buildFunding1(){
 
       // Pre-move any Signing Package/Pkg files (top-level only) to FD2 so they never enter FD1
       const signersTop = topLevel.filter(f => signingRe.test(f.name));
-      if (signersTop.length) {
-        for (const f of signersTop) await moveFileToFD2ByName(f.name);
-      }
+      if (signersTop.length) for (const f of signersTop) await moveFileToFD2ByName(f.name);
 
       // Leftovers = top-level PDFs not summaries, not outputs, not signing pkg, not used by Closing
       files = topLevel.filter(f =>
@@ -361,9 +388,7 @@ async function buildFunding1(){
       // Save summary then move the exact FD1 inputs (top-level leftovers) into FD2
       const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
       await writeFile(fd2, `_summary_funding_docs.pdf`, summaryBlob);
-      for (const f of files) {
-        await moveFileToFD2ByName(f.name);
-      }
+      for (const f of files) await moveFileToFD2ByName(f.name);
     }
 
     log('Funding Docs 1 ready.');
@@ -399,12 +424,8 @@ async function buildClientPkg(){
 
     const chosen = pickOne(slot, matches);
     if(chosen){
-      // avoid accidental duplicates inside Client Package
-      if(!parts.find(p=>p.name===chosen.name)){
-        parts.push(chosen); lines.push(`${label}: ${chosen.name}`);
-      } else {
-        lines.push(`${label}: ${chosen.name} (deduped)`);
-      }
+      if(!parts.find(p=>p.name===chosen.name)){ parts.push(chosen); lines.push(`${label}: ${chosen.name}`); }
+      else { lines.push(`${label}: ${chosen.name} (deduped)`); }
       if(slot==='thank you') chosenThankYou = chosen;
       if(slot==='amortization') chosenAmort = chosen;
     } else { lines.push(`${label}: MISSING`); }
@@ -427,6 +448,10 @@ async function downloadFD2Zip(){
   try {
     setStatus('Preparing Funding Docs 2.zip…','running');
     log('Preparing Funding Docs 2.zip ...');
+    if (typeof window.JSZip === 'undefined') {
+      const msg = 'JSZip not loaded. Check vendor path/order.';
+      console.error(msg); log(msg); throw new Error(msg);
+    }
     const zip = new JSZip();
     if(dirHandle){
       const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
@@ -438,7 +463,11 @@ async function downloadFD2Zip(){
           files.push(file);
         }
       }
-      files.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
+      files.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name);
+        for(let i=0;i<Math.max(ak.length,bk.length);i++){
+          if(ak[i]==null) return -1; if(bk[i]==null) return 1;
+          if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1;
+        } return 0; });
       for(const f of files){ const buf = await f.arrayBuffer(); zip.file(f.name, buf); }
       const blob = await zip.generateAsync({type:'blob'});
       const outName = folderPrefix()+" - Funding Docs 2.zip";
@@ -484,21 +513,56 @@ async function runAll(){
   }
 }
 
-// ======= UI Events =======
-$('#pick').addEventListener('change', (e)=>{ indexFiles(e.target.files); const v=listCandidates(); renderSlots(v); setActionsEnabled(pickedFiles.length>0); });
-$('#scanBtn').addEventListener('click', ()=>{ if(pickedFiles.length===0) return; const v=listCandidates(); renderSlots(v); log('Analysis updated.'); });
-$('#grantFs').addEventListener('click', grantFolderAccess);
-$('#buildClosing').addEventListener('click', buildClosing);
-$('#buildFunding1').addEventListener('click', buildFunding1);
-$('#buildClientPkg').addEventListener('click', buildClientPkg);
-$('#zipFD2').addEventListener('click', downloadFD2Zip);
-$('#runAll').addEventListener('click', runAll);
-
+// ======= UI binding (defer-safe) =======
 function setActionsEnabled(enabled){
-  ['buildClosing','buildFunding1','buildClientPkg','zipFD2','runAll'].forEach(id=>{ const b=$('#'+id); if(b) b.disabled = !enabled; });
+  ['buildClosing','buildFunding1','buildClientPkg','zipFD2','runAll']
+    .forEach(id=>{ const b=$('#'+id); if(b) b.disabled = !enabled; });
 }
 
-// Drag & drop folder support (Chrome-based)
+function bindUI() {
+  const pick = document.getElementById('pick');
+  const scanBtn = document.getElementById('scanBtn');
+  const grantFs = document.getElementById('grantFs');
+
+  if (!pick || !scanBtn || !grantFs) {
+    console.error('Startup error: key UI elements not found');
+    return;
+  }
+
+  pick.addEventListener('change', (e) => {
+    indexFiles(e.target.files);
+    const v = listCandidates();
+    renderSlots(v);
+    setActionsEnabled(pickedFiles.length > 0);
+  });
+
+  scanBtn.addEventListener('click', () => {
+    if (pickedFiles.length === 0) return;
+    const v = listCandidates();
+    renderSlots(v);
+    log('Analysis updated.');
+  });
+
+  grantFs.addEventListener('click', grantFolderAccess);
+  document.getElementById('buildClosing').addEventListener('click', buildClosing);
+  document.getElementById('buildFunding1').addEventListener('click', buildFunding1);
+  document.getElementById('buildClientPkg').addEventListener('click', buildClientPkg);
+  document.getElementById('zipFD2').addEventListener('click', downloadFD2Zip);
+  document.getElementById('runAll').addEventListener('click', runAll);
+
+  // Initial state
+  setActionsEnabled(false);
+  log('Ready. Select a folder to begin.');
+}
+
+// Bind after DOM is parsed, regardless of script loading details
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bindUI);
+} else {
+  bindUI();
+}
+
+// ======= Drag & drop folder support (Chrome-based) =======
 window.addEventListener('dragover', e=>{ e.preventDefault(); });
 window.addEventListener('drop', e=>{
   e.preventDefault();
@@ -509,9 +573,14 @@ window.addEventListener('drop', e=>{
     const acc = [];
     const walk = (ent, path='')=>{
       if(ent.isFile){ ent.file(f=>{ f.webkitRelativePath = path + f.name; acc.push(f); }, ()=>{}); }
-      else if(ent.isDirectory){ const reader = ent.createReader(); reader.readEntries(ents=>{ ents.forEach(ch=> walk(ch, path + ent.name + '/')); }, ()=>{}); }
-    };
+      else if(ent.isDirectory){ const reader = ent.createReader();
+        reader.readEntries(ents=>{ ents.forEach(ch=> walk(ch, path + ent.name + '/')); }, ()=>{}); }
+      };
     walk(entry); setTimeout(()=> res(acc), 300);
   }));
-  Promise.all(promises).then(groups=>{ const all = groups.flat(); indexFiles(all); const v=listCandidates(); renderSlots(v); setActionsEnabled(pickedFiles.length>0); });
+  Promise.all(promises).then(groups=>{
+    const all = groups.flat(); indexFiles(all);
+    const v=listCandidates(); renderSlots(v);
+    setActionsEnabled(pickedFiles.length>0);
+  });
 });
