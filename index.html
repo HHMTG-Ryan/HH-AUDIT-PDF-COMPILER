@@ -197,9 +197,8 @@
       log('Moved to Funding Docs 2: ' + name);
     }catch(e){ log('Move failed (skip if not in top-level): ' + name); }
   }
-  }
 
-  // Read bytes from in-memory File, else fall back to disk (root, then FD2)
+  // Read bytes from in-memory File, else fall back to disk (root, then FD2) (root, then FD2)
   async function readBytesSmart(file){
     try { return await file.arrayBuffer(); } catch(e) {}
     if(!dirHandle) throw new Error('File not readable and no FS handle');
