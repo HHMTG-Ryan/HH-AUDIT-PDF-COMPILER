@@ -34,6 +34,24 @@ const log = (m) => { const el=$('#log'); el.textContent += m +"\n"; el.scrollTop
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const natKey = (s) => s.toLowerCase().split(/(\d+)/).map(t=>/^\d+$/.test(t)?Number(t):t);
 
+// ======= Status UI helpers =======
+function setStatus(text, state='running'){
+  const el = document.getElementById('status');
+  if(!el) return;
+  el.removeAttribute('hidden');
+  el.dataset.state = state; // running | ready | error
+  el.querySelector('.status-text').textContent = text;
+  const spin = el.querySelector('.spinner');
+  if(spin) spin.style.display = (state === 'running') ? 'inline-block' : 'none';
+}
+function clearStatus(){
+  const el = document.getElementById('status');
+  if(!el) return;
+  el.dataset.state = 'ready';
+  el.querySelector('.status-text').textContent = '';
+  el.setAttribute('hidden','');
+}
+
 // ======= FS Access helpers =======
 async function grantFolderAccess(){
   if(!('showDirectoryPicker' in window)){
@@ -103,7 +121,7 @@ async function readBytesSmart(file){
 function indexFiles(files){
   pickedMap.clear();
   const pdfs = [...files].filter(f=> f.name.toLowerCase().endsWith('.pdf'));
-  pdfs.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
+  pdfs.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i)<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
   pickedFiles = pdfs;
   for(const f of pdfs){ const n = norm(f.name); if(!pickedMap.has(n)) pickedMap.set(n,[]); pickedMap.get(n).push(f); }
   $('#selInfo').textContent = `${pdfs.length} PDF(s) selected`;
@@ -243,6 +261,7 @@ function folderPrefix(){
 
 // ======= Build steps =======
 async function buildClosing(){
+  setStatus('Building Closing Docs…','running');
   log('Building Closing Docs...');
   const v = listCandidates();
   const summaryBlob = await makeSummaryPDF('Closing Docs', v.summary);
@@ -262,56 +281,87 @@ async function buildClosing(){
     await sleep(300);
   }
   log('Closing Docs ready.');
+  setStatus('Closing Docs complete.','ready');
 }
 
 async function buildFunding1(){
   try {
+    setStatus('Building Funding Docs 1…', 'running');
     log('Building Funding Docs 1...');
-    const signingRe = /(signing\s*(package|pkg))/i; // exclude/move any signing package/pkg
+
+    const signingRe = /(signing\s*(package|pkg))/i;
     let files;
-    if(dirHandle){
+
+    if (dirHandle) {
+      // Names to exclude (outputs we generate)
       const exclude = new Set([
         (folderPrefix()+" - Closing Docs.pdf").toLowerCase(),
         (folderPrefix()+" - Funding Docs 1.pdf").toLowerCase(),
         (folderPrefix()+" - Closing Package (for Client).pdf").toLowerCase()
       ]);
-      const all = await readTopLevelPDFsFromFS();
-      // Move Signing Package/Pkg into FD2 pre-merge
-      const signers = all.filter(f => signingRe.test(f.name));
-      if(signers.length){ for(const f of signers){ await moveFileToFD2ByName(f.name); } }
-      files = all.filter(f=> !f.name.startsWith('_summary') && !exclude.has(f.name.toLowerCase()) && !signingRe.test(f.name));
+
+      // Only read top-level PDFs for FD1 inputs (leftovers after Closing)
+      const topLevel = await readTopLevelPDFsFromFS();
+
+      // Pre-move any Signing Package/Pkg files (top-level only) to FD2 so they never enter FD1
+      const signersTop = topLevel.filter(f => signingRe.test(f.name));
+      if (signersTop.length) {
+        for (const f of signersTop) await moveFileToFD2ByName(f.name);
+      }
+
+      // Leftovers = top-level PDFs not summaries, not outputs, not signing pkg, not used by Closing
+      files = topLevel.filter(f =>
+        !f.name.toLowerCase().startsWith('_summary') &&
+        !exclude.has(f.name.toLowerCase()) &&
+        !signingRe.test(f.name) &&
+        !(lastClosingUsedNames && lastClosingUsedNames.has(f.name))
+      );
     } else {
-      files = pickedFiles.filter(f=> !/^_summary/i.test(f.name) && !/(signing\s*(package|pkg))/i.test(f.name));
+      // No write mode: use selected files, simulate leftovers by excluding Closing set and our generated names
+      const exclude = new Set([
+        (folderPrefix()+" - Closing Docs.pdf").toLowerCase(),
+        (folderPrefix()+" - Funding Docs 1.pdf").toLowerCase(),
+        (folderPrefix()+" - Closing Package (for Client).pdf").toLowerCase()
+      ]);
+      files = pickedFiles.filter(f =>
+        !/^_summary/i.test(f.name) &&
+        !signingRe.test(f.name) &&
+        !exclude.has(f.name.toLowerCase()) &&
+        !(lastClosingUsedNames && lastClosingUsedNames.has(f.name))
+      );
     }
 
-    // Extra safety: never include anything already used in Closing
-    if(lastClosingUsedNames && lastClosingUsedNames.size){
-      files = files.filter(f => !lastClosingUsedNames.has(f.name));
-    }
-
-    // de-dup by filename
+    // De-dup by filename
     const seen = new Set();
-    files = files.filter(f=>{ if(seen.has(f.name)) return false; seen.add(f.name); return true; });
+    files = files.filter(f => !seen.has(f.name) && seen.add(f.name));
 
     log(`Funding1: ${files.length} file(s) to merge.`);
-    if(!files.length) log('Funding1: No remaining top-level PDFs after Closing — cover only.');
-    const names = files.map(f=>f.name).sort();
+    const names = files.map(f => f.name).sort();
     const summaryBlob = await makeSummaryPDF('Funding Docs', names);
     const outName = folderPrefix()+" - Funding Docs 1.pdf";
+
     await mergePDFs(files, summaryBlob, outName, !!dirHandle);
 
-    if(dirHandle){
+    if (dirHandle) {
+      // Save summary then move the exact FD1 inputs (top-level leftovers) into FD2
       const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
       await writeFile(fd2, `_summary_funding_docs.pdf`, summaryBlob);
-      for(const f of files){ await moveFileToFD2ByName(f.name); }
+      for (const f of files) {
+        await moveFileToFD2ByName(f.name);
+      }
     }
+
     log('Funding Docs 1 ready.');
+    setStatus('Funding Docs 1 complete.', 'ready');
   } catch (e) {
-    console.error(e); log('Error building Funding Docs 1: ' + (e?.message || e));
+    console.error(e);
+    log('Error building Funding Docs 1: ' + (e?.message || e));
+    setStatus('Funding Docs 1 failed.', 'error');
   }
 }
 
 async function buildClientPkg(){
+  setStatus('Building Client Closing Package…','running');
   log('Building Client Closing Package...');
   const all = Array.from(pickedMap.values()).flat();
   const lower = new Map(all.map(f=>[f, norm(f.name)]));
@@ -355,10 +405,12 @@ async function buildClientPkg(){
     for(const f of [chosenThankYou, chosenAmort]){ if(f) await moveFileToFD2ByName(f.name); }
   }
   log('Client Closing Package ready.');
+  setStatus('Client Package complete.','ready');
 }
 
 async function downloadFD2Zip(){
   try {
+    setStatus('Preparing Funding Docs 2.zip…','running');
     log('Preparing Funding Docs 2.zip ...');
     const zip = new JSZip();
     if(dirHandle){
@@ -386,7 +438,12 @@ async function downloadFD2Zip(){
       downloadBlob(blob, folderPrefix()+" - Funding Docs 2.zip");
       log('ZIP ready (download).');
     }
-  } catch(e){ console.error(e); log('ZIP error: ' + (e?.message || e)); }
+    setStatus('Funding Docs 2.zip ready.','ready');
+  } catch(e){ 
+    console.error(e); 
+    log('ZIP error: ' + (e?.message || e)); 
+    setStatus('ZIP creation failed.','error');
+  }
 }
 
 async function runAll(){
@@ -397,13 +454,19 @@ async function runAll(){
       const b = document.getElementById('grantFs');
       if(b){ b.disabled = true; b.title = 'Use Chrome/Edge for write mode'; }
     }
+    setStatus('Running all steps…', 'running');
     log('Running all steps...');
     await buildClosing(); await sleep(800);
     await buildFunding1(); await sleep(800);
     await buildClientPkg(); await sleep(400);
     await downloadFD2Zip();
     log('All steps completed. If multiple files didn\'t appear, allow multiple downloads for this site.');
-  } catch(e) { console.error(e); log('Run All error: ' + (e?.message || e)); }
+    setStatus('All steps completed.','ready');
+  } catch(e) { 
+    console.error(e); 
+    log('Run All error: ' + (e?.message || e)); 
+    setStatus('Run All failed.','error');
+  }
 }
 
 // ======= UI Events =======
