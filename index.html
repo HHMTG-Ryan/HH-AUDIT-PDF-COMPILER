@@ -192,8 +192,11 @@
       const buf = await srcFile.arrayBuffer();
       await writeFile(fd2, name, new Blob([buf], {type:'application/pdf'}));
       await dirHandle.removeEntry(name);
+      // tiny settle to ensure directory listings update before next scan
+      await sleep(50);
       log('Moved to Funding Docs 2: ' + name);
     }catch(e){ log('Move failed (skip if not in top-level): ' + name); }
+  }
   }
 
   // Read bytes from in-memory File, else fall back to disk (root, then FD2)
@@ -359,6 +362,8 @@
       // write the summary directly into FD2
       await writeFile(fd2, `_summary_closing_docs.pdf`, summaryBlob);
       for(const f of v.resUsed){ await moveFileToFD2ByName(f.name); }
+      // allow filesystem to settle before next step
+      await sleep(300);
     }
     log('Closing Docs ready.');
   }
@@ -479,8 +484,8 @@
     try {
       if(pickedFiles.length===0){ log('No PDFs selected.'); return; }
       log('Running all steps...');
-      await buildClosing(); await sleep(400);
-      await buildFunding1(); await sleep(400);
+      await buildClosing(); await sleep(800);
+      await buildFunding1(); await sleep(800);
       await buildClientPkg(); await sleep(400);
       await downloadFD2Zip();
       log('All steps completed. If multiple files didn\'t appear, allow multiple downloads for this site.');
