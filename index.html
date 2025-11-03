@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>HH – Audit PDF Compiler (No Upload)</title>
+  <title>HH – Browser PDF Compiler (No Upload)</title>
   <meta name="description" content="Merge/compile PDFs by filename rules. 100% in your browser. No uploads. No storage." />
   <style>
     :root {
@@ -55,7 +55,6 @@
 <body>
   <header>
     <div class="header-wrap">
-      <!-- Replace src with your real logo path; SVG/PNG recommended -->
       <img class="logo" src="assets/hh-logo.png" alt="House & Home Mortgage Co. logo" onerror="this.style.display='none'">
       <div>
         <h1>HH – Browser PDF Compiler <span class="small">(No Upload)</span></h1>
@@ -141,6 +140,7 @@
   let pickedFiles = []; // File[] from selection/drag
   let pickedMap = new Map(); // normalized name -> File[]
   let dirHandle = null; // File System Access API directory handle
+  let lastClosingUsedNames = new Set(); // track what Closing actually merged (by filename)
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   const $ = (sel) => document.querySelector(sel);
@@ -171,7 +171,6 @@
     await w.write(blob); await w.close();
   }
   async function readTopLevelPDFsFromFS(){
-    // enumerate current top-level PDFs (excludes subfolders)
     const files = [];
     if(!dirHandle) return files;
     for await (const [name, handle] of dirHandle.entries()){
@@ -180,7 +179,6 @@
         files.push(f);
       }
     }
-    // natural sort
     files.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
     return files;
   }
@@ -192,13 +190,12 @@
       const buf = await srcFile.arrayBuffer();
       await writeFile(fd2, name, new Blob([buf], {type:'application/pdf'}));
       await dirHandle.removeEntry(name);
-      // tiny settle to ensure directory listings update before next scan
       await sleep(50);
       log('Moved to Funding Docs 2: ' + name);
     }catch(e){ log('Move failed (skip if not in top-level): ' + name); }
   }
 
-  // Read bytes from in-memory File, else fall back to disk (root, then FD2) (root, then FD2)
+  // Read bytes from in-memory File, else fall back to disk (root, then FD2)
   async function readBytesSmart(file){
     try { return await file.arrayBuffer(); } catch(e) {}
     if(!dirHandle) throw new Error('File not readable and no FS handle');
@@ -233,6 +230,12 @@
     const lowerCache = new Map(all.map(f=>[f, norm(f.name)]));
     const resUsed = []; const summary = []; const slotDocs = new Map(CLOSING_ORDER.map(s=>[s,[]]));
 
+    const uniqByName = (arr)=>{
+      const seen = new Set(); const out=[];
+      for(const f of arr){ if(!seen.has(f.name)){ seen.add(f.name); out.push(f); } }
+      return out;
+    };
+
     for(const slot of CLOSING_ORDER){
       const keys = [slot, ...(SYNONYMS[slot]||[])].map(norm);
       let matches = all.filter(f => keys.some(k => lowerCache.get(f).includes(k)));
@@ -244,11 +247,10 @@
       if(slot === 'form 10 only') matches = matches.filter(f=> !/to lender/i.test(nameNorm(f)) );
 
       if(MULTI_INCLUDE_SLOTS.has(slot)){
-        const chosen = matches.sort((a,b)=> a.lastModified - b.lastModified);
+        const chosen = uniqByName(matches.sort((a,b)=> a.lastModified - b.lastModified));
         slotDocs.set(slot, chosen);
         if(chosen.length){
-          resUsed.push(...chosen);
-          chosen.forEach(m=> summary.push(`${DISPLAY_NAMES[slot]||slot}: ${m.name}`));
+          chosen.forEach(m=> { resUsed.push(m); summary.push(`${DISPLAY_NAMES[slot]||slot}: ${m.name}`); });
         } else {
           summary.push(`${DISPLAY_NAMES[slot]||slot}: MISSING`);
         }
@@ -258,7 +260,10 @@
         else { summary.push(`${DISPLAY_NAMES[slot]||slot}: MISSING`); }
       }
     }
-    return {slotDocs, resUsed, summary};
+    // de-dup resUsed globally
+    const seenUsed = new Set(); const resUsedUniq=[];
+    for(const f of resUsed){ if(!seenUsed.has(f.name)){ seenUsed.add(f.name); resUsedUniq.push(f); } }
+    return {slotDocs, resUsed: resUsedUniq, summary};
   }
 
   function renderSlots(view){
@@ -292,7 +297,11 @@
         pages.forEach(p=> out.addPage(p));
       }
 
-      for(const file of parts){
+      // de-dup parts by filename before merging
+      const seen = new Set(); const uniqueParts=[];
+      for(const f of parts){ if(!seen.has(f.name)){ seen.add(f.name); uniqueParts.push(f); } }
+
+      for(const file of uniqueParts){
         try{
           const bytes = await readBytesSmart(file);
           const src = await loadPdf(bytes);
@@ -328,11 +337,12 @@
     const page = doc.addPage([612, 792]); // Letter
     const font = await doc.embedFont(StandardFonts.Helvetica);
 
-    page.drawText(title, { x:54, y:740, size:20, font, color: rgb(0.9,0.97,1) });
+    // darker, high-contrast cover text
+    page.drawText(title, { x:54, y:740, size:20, font, color: rgb(0.1,0.15,0.2) });
     let y = 710;
     for(const line of lines){
       const isMissing = /MISSING$/.test(line);
-      page.drawText(line, { x:54, y, size:12, font, color: isMissing? rgb(1,0.45,0.45): rgb(0.8,0.9,1) });
+      page.drawText(line, { x:54, y, size:12, font, color: isMissing? rgb(0.75,0,0): rgb(0.2,0.25,0.3) });
       y -= 16; if(y<60){ y = 740; doc.addPage([612,792]); }
     }
     const bytes = await doc.save();
@@ -350,18 +360,19 @@
     log('Building Closing Docs...');
     const v = listCandidates();
     const summaryBlob = await makeSummaryPDF('Closing Docs', v.summary);
-    const parts = CLOSING_ORDER.flatMap(slot => v.slotDocs.get(slot)||[]);
+    // build parts without duplicates across slots
+    const parts = (()=>{ const seen=new Set(); const out=[]; for(const slot of CLOSING_ORDER){ const arr=v.slotDocs.get(slot)||[]; for(const f of arr){ if(!seen.has(f.name)){ seen.add(f.name); out.push(f); } } } return out; })();
     const outName = folderPrefix()+" - Closing Docs.pdf";
 
     await mergePDFs(parts, summaryBlob, outName, !!dirHandle);
 
-    // In write mode, also move used files and write summary to FD2
+    // Track what we used in Closing (by filename) to exclude from Funding1 (extra safety)
+    lastClosingUsedNames = new Set(parts.map(f=>f.name));
+
     if(dirHandle){
       const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
-      // write the summary directly into FD2
       await writeFile(fd2, `_summary_closing_docs.pdf`, summaryBlob);
-      for(const f of v.resUsed){ await moveFileToFD2ByName(f.name); }
-      // allow filesystem to settle before next step
+      for(const f of parts){ await moveFileToFD2ByName(f.name); }
       await sleep(300);
     }
     log('Closing Docs ready.');
@@ -370,7 +381,7 @@
   async function buildFunding1(){
     try {
       log('Building Funding Docs 1...');
-      const signingRe = /^client\s*-?\s*signing\s*package/i; // exclude/move
+      const signingRe = /(signing\s*(package|pkg))/i; // exclude/move any signing package/pkg
       let files;
       if(dirHandle){
         const exclude = new Set([
@@ -379,18 +390,25 @@
           (folderPrefix()+" - Closing Package (for Client).pdf").toLowerCase()
         ]);
         const all = await readTopLevelPDFsFromFS();
-        // move CLIENT - Signing Package into FD2 pre-merge
+        // Move Signing Package/Pkg into FD2 pre-merge
         const signers = all.filter(f => signingRe.test(f.name));
-        if(signers.length){
-          const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
-          for(const f of signers){ await moveFileToFD2ByName(f.name); }
-        }
+        if(signers.length){ for(const f of signers){ await moveFileToFD2ByName(f.name); } }
         files = all.filter(f=> !f.name.startsWith('_summary') && !exclude.has(f.name.toLowerCase()) && !signingRe.test(f.name));
       } else {
-        files = pickedFiles.filter(f=> !/^_summary/i.test(f.name) && !signingRe.test(f.name));
+        files = pickedFiles.filter(f=> !/^_summary/i.test(f.name) && !/(signing\s*(package|pkg))/i.test(f.name));
       }
 
+      // Extra safety: never include anything already used in Closing
+      if(lastClosingUsedNames && lastClosingUsedNames.size){
+        files = files.filter(f => !lastClosingUsedNames.has(f.name));
+      }
+
+      // de-dup by filename
+      const seen = new Set();
+      files = files.filter(f=>{ if(seen.has(f.name)) return false; seen.add(f.name); return true; });
+
       log(`Funding1: ${files.length} file(s) to merge.`);
+      if(!files.length) log('Funding1: No remaining top-level PDFs after Closing — cover only.');
       const names = files.map(f=>f.name).sort();
       const summaryBlob = await makeSummaryPDF('Funding Docs', names);
       const outName = folderPrefix()+" - Funding Docs 1.pdf";
@@ -430,7 +448,12 @@
 
       const chosen = pickOne(slot, matches);
       if(chosen){
-        parts.push(chosen); lines.push(`${label}: ${chosen.name}`);
+        // avoid accidental duplicates inside Client Package
+        if(!parts.find(p=>p.name===chosen.name)){
+          parts.push(chosen); lines.push(`${label}: ${chosen.name}`);
+        } else {
+          lines.push(`${label}: ${chosen.name} (deduped)`);
+        }
         if(slot==='thank you') chosenThankYou = chosen;
         if(slot==='amortization') chosenAmort = chosen;
       } else { lines.push(`${label}: MISSING`); }
@@ -453,21 +476,22 @@
       log('Preparing Funding Docs 2.zip ...');
       const zip = new JSZip();
       if(dirHandle){
-        // Walk FD2 from disk and zip
         const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+        // Natural-sort by name for audit sanity
+        const files = [];
         for await (const [name, handle] of fd2.entries()){
           if(handle.kind==='file'){
             const file = await handle.getFile();
-            const buf = await file.arrayBuffer();
-            zip.file(name, buf);
+            files.push(file);
           }
         }
+        files.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
+        for(const f of files){ const buf = await f.arrayBuffer(); zip.file(f.name, buf); }
         const blob = await zip.generateAsync({type:'blob'});
         const outName = folderPrefix()+" - Funding Docs 2.zip";
         await writeFile(dirHandle, outName, blob);
         log('Saved directly: ' + outName);
       } else {
-        // Prior behavior: zip used files from analysis
         const v = listCandidates();
         const dir = zip.folder('Funding Docs 2');
         const usedSet = new Set(v.resUsed);
@@ -482,6 +506,11 @@
   async function runAll(){
     try {
       if(pickedFiles.length===0){ log('No PDFs selected.'); return; }
+      // Disable FS button when unsupported
+      if(!('showDirectoryPicker' in window)){
+        const b = document.getElementById('grantFs');
+        if(b){ b.disabled = true; b.title = 'Use Chrome/Edge for write mode'; }
+      }
       log('Running all steps...');
       await buildClosing(); await sleep(800);
       await buildFunding1(); await sleep(800);
