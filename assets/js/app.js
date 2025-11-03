@@ -254,9 +254,24 @@ async function makeSummaryPDF(title, lines){
 }
 
 function folderPrefix(){
-  const f = pickedFiles[0]; if(!f) return 'Client';
-  const segs = (f.webkitRelativePath||f.name).split('/').filter(Boolean);
-  return segs.length? segs[0] : 'Client';
+  // Prefer the picked directory name when write mode is on
+  let raw = (typeof dirHandle?.name === 'string' && dirHandle.name)
+    ? dirHandle.name
+    : (() => {
+        const f = pickedFiles[0];
+        if(!f) return '';
+        const segs = (f.webkitRelativePath || f.name).split('/').filter(Boolean);
+        return segs.length ? segs[0] : '';
+      })();
+
+  raw = (raw || '').trim();
+
+  // Take ONLY the first "word" (letters/numbers), splitting on any non-alphanumeric separator
+  // Uses Unicode-aware class to be safe with names containing accents.
+  const parts = raw.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+  // Fallback if we can’t parse something sensible
+  return parts.length ? parts[0] : 'Client';
 }
 
 // ======= Build steps =======
