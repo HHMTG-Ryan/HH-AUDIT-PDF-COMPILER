@@ -6,72 +6,100 @@
   <title>HH – Browser PDF Compiler (No Upload)</title>
   <meta name="description" content="Merge/compile PDFs by filename rules. 100% in your browser. No uploads. No storage." />
   <style>
-    :root { --bg:#0b0f12; --panel:#12181d; --text:#e6eef6; --muted:#8aa0b5; --brand:#26a269; --accent:#3d7bfd; }
-    * { box-sizing: border-box; }
-    html, body { margin:0; padding:0; background:var(--bg); color:var(--text); font:16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
-    header { padding:24px 20px; background: linear-gradient(180deg, rgba(38,162,105,0.15), rgba(0,0,0,0)); border-bottom:1px solid #1c232b; }
-    h1 { margin:0 0 6px; font-size:22px; letter-spacing:0.2px; }
-    .sub { color:var(--muted); font-size:14px; }
-    main { max-width:1100px; margin:0 auto; padding:24px 20px 80px; }
-    .panel { background:var(--panel); border:1px solid #1c232b; border-radius:14px; padding:18px; margin:14px 0; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    label.btn, button.btn { background:#0e141a; border:1px solid #222c36; color:var(--text); padding:10px 14px; border-radius:10px; cursor:pointer; transition: .15s ease; font-weight:600; }
-    button.btn.primary { background:var(--brand); border-color:#1e8052; color:#07130d; }
-    button.btn.ghost { background:transparent; }
-    button.btn:disabled { opacity:.5; cursor:not-allowed; }
-    input[type="file"] { display:none; }
-    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0f141a; border:1px solid #1b242d; border-radius:6px; padding:2px 6px; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#cfe3f8; }
-    .small { font-size:13px; color:var(--muted); }
-    ul.inline { list-style:none; margin:8px 0 0; padding:0; display:flex; gap:10px; flex-wrap:wrap; }
-    .pill { border:1px solid #2a3440; background:#0f1417; padding:6px 8px; border-radius:999px; font-size:12px; }
-    .ok { color:#6dd27c; }
-    .miss { color:#ff7272; }
-    .log { background:#0f1417; border:1px solid #1b2430; border-radius:8px; padding:10px; height:200px; overflow:auto; }
-    details { border:1px solid #1c232b; border-radius:10px; padding:8px 10px; background:#0f1417; }
-    details > summary { cursor:pointer; font-weight:600; }
-    .right { margin-left:auto; }
-    .muted { color:var(--muted); }
-    .badge { font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid #2a3440; background:#0f1417; }
-    a { color:var(--accent); text-decoration:none; }
+    :root {
+      --bg:#f7fafc; --panel:#ffffff; --text:#1a2a33; --muted:#5b7288; --brand:#22a366; --brand-ink:#0a3b22; --accent:#1f6feb; --line:#e6edf3;
+      --btn:#eef2f6; --btn-border:#cfd9e3; --pill:#f1f6fa; --ok:#0e8346; --miss:#c62828;
+    }
+    *{ box-sizing:border-box; }
+    html,body{ margin:0; padding:0; background:var(--bg); color:var(--text); font:16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    header{ padding:20px; background:#ffffff; border-bottom:1px solid var(--line); }
+    .header-wrap{ display:flex; align-items:center; gap:16px; max-width:1100px; margin:0 auto; }
+    .logo{ height:44px; width:auto; object-fit:contain; }
+    h1{ margin:0; font-size:22px; letter-spacing:.2px; }
+    .sub{ color:var(--muted); font-size:14px; }
+    .helper{ font-size:14px; color:var(--muted); margin-top:6px; }
+
+    main{ max-width:1100px; margin:0 auto; padding:20px 20px 80px; }
+    .panel{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; margin:14px 0; box-shadow:0 1px 0 rgba(0,0,0,.02); }
+    .row{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+
+    label.btn, button.btn{ background:var(--btn); border:1px solid var(--btn-border); color:var(--text); padding:12px 16px; border-radius:10px; cursor:pointer; transition:.15s ease; font-weight:600; }
+    button.btn.primary{ background:var(--brand); border-color:#19824f; color:#fff; }
+    button.btn.ghost{ background:transparent; }
+    button.btn:disabled{ opacity:.6; cursor:not-allowed; }
+    input[type="file"]{ display:none; }
+
+    .kbd{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#fff; border:1px solid var(--line); border-radius:6px; padding:2px 6px; }
+    .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#0f1720; }
+    .small{ font-size:13px; color:var(--muted); }
+
+    ul.inline{ list-style:none; margin:8px 0 0; padding:0; display:flex; gap:10px; flex-wrap:wrap; }
+    .pill{ border:1px solid var(--line); background:var(--pill); padding:6px 10px; border-radius:999px; font-size:12px; }
+    .ok{ color:var(--ok); }
+    .miss{ color:var(--miss); }
+
+    .log{ background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px; height:200px; overflow:auto; }
+    details{ border:1px solid var(--line); border-radius:10px; padding:8px 10px; background:#fff; }
+    details > summary{ cursor:pointer; font-weight:600; }
+    .right{ margin-left:auto; }
+    .muted{ color:var(--muted); }
+    .badge{ font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid var(--line); background:#fff; }
+
+    .step{ display:flex; align-items:center; gap:10px; margin:0 0 8px; }
+    .num{ width:28px; height:28px; border-radius:50%; background:var(--brand); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-weight:700; }
+    .title{ font-weight:700; }
+    a{ color:var(--accent); text-decoration:none; }
   </style>
 </head>
 <body>
   <header>
-    <h1>HH – Browser PDF Compiler <span class="small">(No Upload)</span></h1>
-    <div class="sub">Compiles PDFs by filename rules, entirely in your browser. Nothing is uploaded or stored.</div>
+    <div class="header-wrap">
+      <!-- Replace src with your real logo path; SVG/PNG recommended -->
+      <img class="logo" src="assets/hh-logo.png" alt="House & Home Mortgage Co. logo" onerror="this.style.display='none'">
+      <div>
+        <h1>HH – Browser PDF Compiler <span class="small">(No Upload)</span></h1>
+        <div class="sub">Light, fast, and private: compile lender/client PDFs in your browser. Nothing is uploaded.</div>
+        <div class="helper">3 simple steps: 1) Choose folder 2) Review 3) Run All. Optional: enable write access to auto‑organize.</div>
+      </div>
+    </div>
   </header>
 
   <main>
     <div class="panel">
+      <div class="step"><span class="num">1</span><div class="title">Choose your client folder</div></div>
       <div class="row">
         <label class="btn" for="pick">📁 Select Folder of PDFs</label>
         <input id="pick" type="file" webkitdirectory directory multiple accept="application/pdf" />
-        <button id="scanBtn" class="btn">🔍 Scan & Analyse</button>
         <button id="grantFs" class="btn">🗂️ Grant Local Folder Access</button>
         <span id="fsBadge" class="badge muted">Folder Write: OFF</span>
         <span id="selInfo" class="muted right"></span>
       </div>
+      <div class="helper">Tip: On Chrome/Edge, click <b>Grant Local Folder Access</b> to auto‑save, create <em>Funding Docs 2</em>, and move used files. Otherwise you’ll get downloads.</div>
     </div>
 
     <div class="panel grid">
       <div>
-        <h3 style="margin:4px 0 10px;">Closing Docs – Slots</h3>
+        <div class="step"><span class="num">2</span><div class="title">Review what the app found</div></div>
+        <p class="small muted" style="margin:0 0 8px;">Green dots = found · Red X = missing. Rename files if needed and re‑scan.</p>
         <div id="slots"></div>
+        <div class="row" style="margin-top:8px;">
+          <button id="scanBtn" class="btn">🔁 Re‑scan</button>
+          <span class="small">You can also drag a folder onto this page.</span>
+        </div>
       </div>
       <div>
-        <h3 style="margin:4px 0 10px;">Actions</h3>
+        <div class="step"><span class="num">3</span><div class="title">Build & Save</div></div>
         <div class="row" style="margin-bottom:8px;">
           <button id="runAll" class="btn primary" disabled>🚀 Run All (Closing → Funding 1 → Client Pkg → ZIP)</button>
-          <button id="buildClosing" class="btn" disabled>⚙️ Build Closing Docs (PDF)</button>
-          <button id="buildFunding1" class="btn" disabled>📄 Build Funding Docs 1 (PDF)</button>
+          <button id="buildClosing" class="btn" disabled>⚙️ Closing Docs (PDF)</button>
+          <button id="buildFunding1" class="btn" disabled>📄 Funding Docs 1 (PDF)</button>
         </div>
         <div class="row">
-          <button id="buildClientPkg" class="btn" disabled>👪 Build Client Closing Package (PDF)</button>
-          <button id="zipFD2" class="btn" disabled>🗜️ Download “Funding Docs 2”.zip</button>
+          <button id="buildClientPkg" class="btn" disabled>👪 Client Closing Package (PDF)</button>
+          <button id="zipFD2" class="btn" disabled>🗜️ “Funding Docs 2”.zip</button>
         </div>
-        <p class="small muted">All processing is in‑memory. Files never leave your device. <b>Grant Local Folder Access</b> (Chrome/Edge) to auto‑save outputs, create <i>Funding Docs 2</i>, and move used files. Otherwise, files will download as usual.</p>
+        <p class="small muted">If multiple downloads don’t appear, allow them for this site. In write mode, files save straight into the folder.</p>
       </div>
     </div>
 
@@ -168,6 +196,24 @@
     }catch(e){ log('Move failed (skip if not in top-level): ' + name); }
   }
 
+  // Read bytes from in-memory File, else fall back to disk (root, then FD2)
+  async function readBytesSmart(file){
+    try { return await file.arrayBuffer(); } catch(e) {}
+    if(!dirHandle) throw new Error('File not readable and no FS handle');
+    try {
+      const h = await dirHandle.getFileHandle(file.name);
+      const f = await h.getFile();
+      return await f.arrayBuffer();
+    } catch(e) {}
+    try {
+      const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+      const h2 = await fd2.getFileHandle(file.name);
+      const f2 = await h2.getFile();
+      return await f2.arrayBuffer();
+    } catch(e) {}
+    throw new Error('Cannot read: ' + file.name);
+  }
+
   // ======= Selection / Index =======
   function indexFiles(files){
     pickedMap.clear();
@@ -198,8 +244,12 @@
       if(MULTI_INCLUDE_SLOTS.has(slot)){
         const chosen = matches.sort((a,b)=> a.lastModified - b.lastModified);
         slotDocs.set(slot, chosen);
-        resUsed.push(...chosen);
-        chosen.forEach(m=> summary.push(`${DISPLAY_NAMES[slot]||slot}: ${m.name}`));
+        if(chosen.length){
+          resUsed.push(...chosen);
+          chosen.forEach(m=> summary.push(`${DISPLAY_NAMES[slot]||slot}: ${m.name}`));
+        } else {
+          summary.push(`${DISPLAY_NAMES[slot]||slot}: MISSING`);
+        }
       } else {
         const chosen = matches.sort((a,b)=> a.lastModified - b.lastModified).slice(-1)[0];
         if(chosen){ slotDocs.set(slot, [chosen]); resUsed.push(chosen); summary.push(`${DISPLAY_NAMES[slot]||slot}: ${chosen.name}`); }
@@ -242,7 +292,7 @@
 
       for(const file of parts){
         try{
-          const bytes = await file.arrayBuffer();
+          const bytes = await readBytesSmart(file);
           const src = await loadPdf(bytes);
           const pages = await out.copyPages(src, src.getPageIndices());
           pages.forEach(p=> out.addPage(p));
@@ -316,19 +366,24 @@
   async function buildFunding1(){
     try {
       log('Building Funding Docs 1...');
+      const signingRe = /^client\s*-?\s*signing\s*package/i; // exclude/move
       let files;
       if(dirHandle){
-        // live top-level scan from disk
         const exclude = new Set([
           (folderPrefix()+" - Closing Docs.pdf").toLowerCase(),
           (folderPrefix()+" - Funding Docs 1.pdf").toLowerCase(),
           (folderPrefix()+" - Closing Package (for Client).pdf").toLowerCase()
         ]);
         const all = await readTopLevelPDFsFromFS();
-        files = all.filter(f=> !f.name.startsWith('_summary') && !exclude.has(f.name.toLowerCase()));
+        // move CLIENT - Signing Package into FD2 pre-merge
+        const signers = all.filter(f => signingRe.test(f.name));
+        if(signers.length){
+          const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+          for(const f of signers){ await moveFileToFD2ByName(f.name); }
+        }
+        files = all.filter(f=> !f.name.startsWith('_summary') && !exclude.has(f.name.toLowerCase()) && !signingRe.test(f.name));
       } else {
-        // prior behavior
-        files = pickedFiles.filter(f=> !/^_summary/i.test(f.name));
+        files = pickedFiles.filter(f=> !/^_summary/i.test(f.name) && !signingRe.test(f.name));
       }
 
       log(`Funding1: ${files.length} file(s) to merge.`);
@@ -340,7 +395,6 @@
       if(dirHandle){
         const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
         await writeFile(fd2, `_summary_funding_docs.pdf`, summaryBlob);
-        // move all files included in Funding Docs 1 to FD2
         for(const f of files){ await moveFileToFD2ByName(f.name); }
       }
       log('Funding Docs 1 ready.');
