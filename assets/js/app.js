@@ -1,44 +1,439 @@
-:root {
-  --bg:#f7fafc; --panel:#ffffff; --text:#1a2a33; --muted:#5b7288; --brand:#22a366; --brand-ink:#0a3b22; --accent:#1f6feb; --line:#e6edf3;
-  --btn:#eef2f6; --btn-border:#cfd9e3; --pill:#f1f6fa; --ok:#0e8346; --miss:#c62828;
+// ======= CONFIG mirrored from Python (will externalize in Step 7) =======
+const CLOSING_ORDER = [
+  "commitment only","kyc","idv","pep","mtg application","insurance","consent","cost of credit","form 10 only","form 10 to lender"
+];
+const MULTI_INCLUDE_SLOTS = new Set(["kyc","pep","consent","insurance"]);
+const DISPLAY_NAMES = {
+  "commitment only":"Commitment Only","kyc":"KYC","idv":"IDV","pep":"PEP","mtg application":"Mtg Application","insurance":"Insurance","consent":"Consent","cost of credit":"Cost of Borrowing","form 10 only":"Form 10 Only","form 10 to lender":"Form 10 to Lender",
+};
+const CLIENT_PKG_ORDER = ["thank you","amortization","commitment only","form 10 only","cost of credit"];
+const SYNONYMS = {
+  "commitment only":["commit only","commitment"],
+  "mtg application":["mortgage application","mtg app","mortgage app","application"],
+  "idv":["idv","verification"],
+  "cost of credit":["cob","cost of borrowing","disclosure"],
+  "insurance":["prospr","mpp","manulife","sun life","sunlife","indem","assurant"],
+  "form 10 only":["form 10","form10","broker compensation"],
+  "form 10 to lender":["form 10 to lender","form10 to lender","compensation to lender"],
+  "kyc":["know your client","know-your-client","client information"],
+  "pep":["pep","politically exposed"],
+  "consent":["consent","authorization","authorisation"],
+  "thank you":["thank you","thank-you","thanks"],
+  "amortization":["amortization","amortisation","amort sched","amort schedule"],
+};
+
+// ======= State =======
+let pickedFiles = []; // File[] from selection/drag
+let pickedMap = new Map(); // normalized name -> File[]
+let dirHandle = null; // File System Access API directory handle
+let lastClosingUsedNames = new Set(); // track what Closing actually merged (by filename)
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const $ = (sel) => document.querySelector(sel);
+const log = (m) => { const el=$('#log'); el.textContent += m +"\n"; el.scrollTop = el.scrollHeight; };
+const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+const natKey = (s) => s.toLowerCase().split(/(\d+)/).map(t=>/^\d+$/.test(t)?Number(t):t);
+
+// ======= FS Access helpers =======
+async function grantFolderAccess(){
+  if(!('showDirectoryPicker' in window)){
+    log('This browser does not support Local Folder Access. Use Chrome/Edge for write mode.');
+    return;
+  }
+  try{
+    dirHandle = await window.showDirectoryPicker();
+    $('#fsBadge').textContent = 'Folder Write: ON (' + (dirHandle.name || 'selected') + ')';
+    $('#fsBadge').classList.remove('muted');
+    log('Folder access granted. Writes/moves will target: ' + (dirHandle.name || 'selected folder'));
+  }catch(e){ log('Folder access cancelled.'); }
 }
-*{ box-sizing:border-box; }
-html,body{ margin:0; padding:0; background:var(--bg); color:var(--text); font:16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
-header{ padding:20px; background:#ffffff; border-bottom:1px solid var(--line); }
-.header-wrap{ display:flex; align-items:center; gap:16px; max-width:1100px; margin:0 auto; }
-.logo{ height:44px; width:auto; object-fit:contain; }
-h1{ margin:0; font-size:22px; letter-spacing:.2px; }
-.sub{ color:var(--muted); font-size:14px; }
-.helper{ font-size:14px; color:var(--muted); margin-top:6px; }
 
-main{ max-width:1100px; margin:0 auto; padding:20px 20px 80px; }
-.panel{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; margin:14px 0; box-shadow:0 1px 0 rgba(0,0,0,.02); }
-.row{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+async function ensureDir(parent, name){
+  return await parent.getDirectoryHandle(name, { create: true });
+}
+async function writeFile(parent, name, blob){
+  const fileHandle = await parent.getFileHandle(name, { create: true });
+  const w = await fileHandle.createWritable();
+  await w.write(blob); await w.close();
+}
+async function readTopLevelPDFsFromFS(){
+  const files = [];
+  if(!dirHandle) return files;
+  for await (const [name, handle] of dirHandle.entries()){
+    if(handle.kind === 'file' && name.toLowerCase().endsWith('.pdf')){
+      const f = await handle.getFile();
+      files.push(f);
+    }
+  }
+  files.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
+  return files;
+}
+async function moveFileToFD2ByName(name){
+  try{
+    const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+    const srcHandle = await dirHandle.getFileHandle(name);
+    const srcFile = await srcHandle.getFile();
+    const buf = await srcFile.arrayBuffer();
+    await writeFile(fd2, name, new Blob([buf], {type:'application/pdf'}));
+    await dirHandle.removeEntry(name);
+    await sleep(50);
+    log('Moved to Funding Docs 2: ' + name);
+  }catch(e){ log('Move failed (skip if not in top-level): ' + name); }
+}
 
-label.btn, button.btn{ background:var(--btn); border:1px solid var(--btn-border); color:var(--text); padding:12px 16px; border-radius:10px; cursor:pointer; transition:.15s ease; font-weight:600; }
-button.btn.primary{ background:var(--brand); border-color:#19824f; color:#fff; }
-button.btn.ghost{ background:transparent; }
-button.btn:disabled{ opacity:.6; cursor:not-allowed; }
-input[type="file"]{ display:none; }
+// Read bytes from in-memory File, else fall back to disk (root, then FD2)
+async function readBytesSmart(file){
+  try { return await file.arrayBuffer(); } catch(e) {}
+  if(!dirHandle) throw new Error('File not readable and no FS handle');
+  try {
+    const h = await dirHandle.getFileHandle(file.name);
+    const f = await h.getFile();
+    return await f.arrayBuffer();
+  } catch(e) {}
+  try {
+    const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+    const h2 = await fd2.getFileHandle(file.name);
+    const f2 = await h2.getFile();
+    return await f2.arrayBuffer();
+  } catch(e) {}
+  throw new Error('Cannot read: ' + file.name);
+}
 
-.kbd{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#fff; border:1px solid var(--line); border-radius:6px; padding:2px 6px; }
-.grid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
-.mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#0f1720; }
-.small{ font-size:13px; color:var(--muted); }
+// ======= Selection / Index =======
+function indexFiles(files){
+  pickedMap.clear();
+  const pdfs = [...files].filter(f=> f.name.toLowerCase().endsWith('.pdf'));
+  pdfs.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
+  pickedFiles = pdfs;
+  for(const f of pdfs){ const n = norm(f.name); if(!pickedMap.has(n)) pickedMap.set(n,[]); pickedMap.get(n).push(f); }
+  $('#selInfo').textContent = `${pdfs.length} PDF(s) selected`;
+  log(`Indexed ${pdfs.length} PDFs.`);
+}
 
-ul.inline{ list-style:none; margin:8px 0 0; padding:0; display:flex; gap:10px; flex-wrap:wrap; }
-.pill{ border:1px solid var(--line); background:var(--pill); padding:6px 10px; border-radius:999px; font-size:12px; }
-.ok{ color:var(--ok); }
-.miss{ color:var(--miss); }
+// ======= Matching =======
+function listCandidates(){
+  const all = Array.from(pickedMap.values()).flat();
+  const lowerCache = new Map(all.map(f=>[f, norm(f.name)]));
+  const resUsed = []; const summary = []; const slotDocs = new Map(CLOSING_ORDER.map(s=>[s,[]]));
 
-.log{ background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px; height:200px; overflow:auto; }
-details{ border:1px solid var(--line); border-radius:10px; padding:8px 10px; background:#fff; }
-details > summary{ cursor:pointer; font-weight:600; }
-.right{ margin-left:auto; }
-.muted{ color:var(--muted); }
-.badge{ font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid var(--line); background:#fff; }
+  const uniqByName = (arr)=>{
+    const seen = new Set(); const out=[];
+    for(const f of arr){ if(!seen.has(f.name)){ seen.add(f.name); out.push(f); } }
+    return out;
+  };
 
-.step{ display:flex; align-items:center; gap:10px; margin:0 0 8px; }
-.num{ width:28px; height:28px; border-radius:50%; background:var(--brand); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-weight:700; }
-.title{ font-weight:700; }
-a{ color:var(--accent); text-decoration:none; }
+  for(const slot of CLOSING_ORDER){
+    const keys = [slot, ...(SYNONYMS[slot]||[])].map(norm);
+    let matches = all.filter(f => keys.some(k => lowerCache.get(f).includes(k)));
+    const nameNorm = (f)=> lowerCache.get(f);
+    if(slot === 'cost of credit'){
+      const cobRe = /(?<![a-z])cob(?![a-z])|\bcost[\s_-]*of[\s_-]*(?:borrowing|credit)\b/i;
+      matches = matches.filter(f=> cobRe.test(nameNorm(f)) && !/(form 10|form10|compensation|to lender)/i.test(nameNorm(f)) );
+    }
+    if(slot === 'form 10 only') matches = matches.filter(f=> !/to lender/i.test(nameNorm(f)) );
+
+    if(MULTI_INCLUDE_SLOTS.has(slot)){
+      const chosen = uniqByName(matches.sort((a,b)=> a.lastModified - b.lastModified));
+      slotDocs.set(slot, chosen);
+      if(chosen.length){
+        chosen.forEach(m=> { resUsed.push(m); summary.push(`${DISPLAY_NAMES[slot]||slot}: ${m.name}`); });
+      } else {
+        summary.push(`${DISPLAY_NAMES[slot]||slot}: MISSING`);
+      }
+    } else {
+      const chosen = matches.sort((a,b)=> a.lastModified - b.lastModified).slice(-1)[0];
+      if(chosen){ slotDocs.set(slot, [chosen]); resUsed.push(chosen); summary.push(`${DISPLAY_NAMES[slot]||slot}: ${chosen.name}`); }
+      else { summary.push(`${DISPLAY_NAMES[slot]||slot}: MISSING`); }
+    }
+  }
+  // de-dup resUsed globally
+  const seenUsed = new Set(); const resUsedUniq=[];
+  for(const f of resUsed){ if(!seenUsed.has(f.name)){ seenUsed.add(f.name); resUsedUniq.push(f); } }
+  return {slotDocs, resUsed: resUsedUniq, summary};
+}
+
+function renderSlots(view){
+  const root = $('#slots'); root.innerHTML = '';
+  const ul = document.createElement('ul'); ul.className = 'inline';
+  for(const slot of CLOSING_ORDER){
+    const arr = view.slotDocs.get(slot) || [];
+    const li = document.createElement('li'); li.className='pill';
+    const ok = arr.length>0; li.innerHTML = `<span class="${ok? 'ok':'miss'}">${ok? '✔':'✖'}</span> <b>${DISPLAY_NAMES[slot]||slot}</b>${ ok? ` · ${arr.length} file(s)` : ''}`;
+    ul.appendChild(li);
+  }
+  root.appendChild(ul);
+}
+
+// ======= PDF helpers (encryption tolerant) =======
+async function mergePDFs(parts, summaryBlob, outName, writeToFolder=false){
+  const { PDFDocument } = PDFLib;
+
+  async function loadPdf(bytes){
+    try { return await PDFDocument.load(bytes); }
+    catch(e){ return await PDFDocument.load(bytes, { ignoreEncryption: true }); }
+  }
+
+  try {
+    const out = await PDFDocument.create();
+
+    if(summaryBlob){
+      const sumBytes = await summaryBlob.arrayBuffer();
+      const sumDoc = await loadPdf(sumBytes);
+      const pages = await out.copyPages(sumDoc, sumDoc.getPageIndices());
+      pages.forEach(p=> out.addPage(p));
+    }
+
+    // de-dup parts by filename before merging
+    const seen = new Set(); const uniqueParts=[];
+    for(const f of parts){ if(!seen.has(f.name)){ seen.add(f.name); uniqueParts.push(f); } }
+
+    for(const file of uniqueParts){
+      try{
+        const bytes = await readBytesSmart(file);
+        const src = await loadPdf(bytes);
+        const pages = await out.copyPages(src, src.getPageIndices());
+        pages.forEach(p=> out.addPage(p));
+      }catch(e){ log(`Merge warning: skipped encrypted or unreadable file → ${file.name}`); }
+    }
+
+    const outBytes = await out.save();
+    const outBlob = new Blob([outBytes], {type:'application/pdf'});
+    if(writeToFolder && dirHandle){
+      await writeFile(dirHandle, outName, outBlob);
+      log('Saved directly: ' + outName);
+    } else {
+      downloadBlob(outBlob, outName);
+    }
+  } catch (e) {
+    console.error(e); log('Merge error: ' + (e?.message || e));
+    throw e;
+  }
+}
+
+function downloadBlob(blob, name){
+  const a = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1500);
+}
+
+async function makeSummaryPDF(title, lines){
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]); // Letter
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  // darker, high-contrast cover text
+  page.drawText(title, { x:54, y:740, size:20, font, color: rgb(0.1,0.15,0.2) });
+  let y = 710;
+  for(const line of lines){
+    const isMissing = /MISSING$/.test(line);
+    page.drawText(line, { x:54, y, size:12, font, color: isMissing? rgb(0.75,0,0): rgb(0.2,0.25,0.3) });
+    y -= 16; if(y<60){ y = 740; doc.addPage([612,792]); }
+  }
+  const bytes = await doc.save();
+  return new Blob([bytes], {type:'application/pdf'});
+}
+
+function folderPrefix(){
+  const f = pickedFiles[0]; if(!f) return 'Client';
+  const segs = (f.webkitRelativePath||f.name).split('/').filter(Boolean);
+  return segs.length? segs[0] : 'Client';
+}
+
+// ======= Build steps =======
+async function buildClosing(){
+  log('Building Closing Docs...');
+  const v = listCandidates();
+  const summaryBlob = await makeSummaryPDF('Closing Docs', v.summary);
+  // build parts without duplicates across slots
+  const parts = (()=>{ const seen=new Set(); const out=[]; for(const slot of CLOSING_ORDER){ const arr=v.slotDocs.get(slot)||[]; for(const f of arr){ if(!seen.has(f.name)){ seen.add(f.name); out.push(f); } } } return out; })();
+  const outName = folderPrefix()+" - Closing Docs.pdf";
+
+  await mergePDFs(parts, summaryBlob, outName, !!dirHandle);
+
+  // Track what we used in Closing (by filename) to exclude from Funding1 (extra safety)
+  lastClosingUsedNames = new Set(parts.map(f=>f.name));
+
+  if(dirHandle){
+    const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+    await writeFile(fd2, `_summary_closing_docs.pdf`, summaryBlob);
+    for(const f of parts){ await moveFileToFD2ByName(f.name); }
+    await sleep(300);
+  }
+  log('Closing Docs ready.');
+}
+
+async function buildFunding1(){
+  try {
+    log('Building Funding Docs 1...');
+    const signingRe = /(signing\s*(package|pkg))/i; // exclude/move any signing package/pkg
+    let files;
+    if(dirHandle){
+      const exclude = new Set([
+        (folderPrefix()+" - Closing Docs.pdf").toLowerCase(),
+        (folderPrefix()+" - Funding Docs 1.pdf").toLowerCase(),
+        (folderPrefix()+" - Closing Package (for Client).pdf").toLowerCase()
+      ]);
+      const all = await readTopLevelPDFsFromFS();
+      // Move Signing Package/Pkg into FD2 pre-merge
+      const signers = all.filter(f => signingRe.test(f.name));
+      if(signers.length){ for(const f of signers){ await moveFileToFD2ByName(f.name); } }
+      files = all.filter(f=> !f.name.startsWith('_summary') && !exclude.has(f.name.toLowerCase()) && !signingRe.test(f.name));
+    } else {
+      files = pickedFiles.filter(f=> !/^_summary/i.test(f.name) && !/(signing\s*(package|pkg))/i.test(f.name));
+    }
+
+    // Extra safety: never include anything already used in Closing
+    if(lastClosingUsedNames && lastClosingUsedNames.size){
+      files = files.filter(f => !lastClosingUsedNames.has(f.name));
+    }
+
+    // de-dup by filename
+    const seen = new Set();
+    files = files.filter(f=>{ if(seen.has(f.name)) return false; seen.add(f.name); return true; });
+
+    log(`Funding1: ${files.length} file(s) to merge.`);
+    if(!files.length) log('Funding1: No remaining top-level PDFs after Closing — cover only.');
+    const names = files.map(f=>f.name).sort();
+    const summaryBlob = await makeSummaryPDF('Funding Docs', names);
+    const outName = folderPrefix()+" - Funding Docs 1.pdf";
+    await mergePDFs(files, summaryBlob, outName, !!dirHandle);
+
+    if(dirHandle){
+      const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+      await writeFile(fd2, `_summary_funding_docs.pdf`, summaryBlob);
+      for(const f of files){ await moveFileToFD2ByName(f.name); }
+    }
+    log('Funding Docs 1 ready.');
+  } catch (e) {
+    console.error(e); log('Error building Funding Docs 1: ' + (e?.message || e));
+  }
+}
+
+async function buildClientPkg(){
+  log('Building Client Closing Package...');
+  const all = Array.from(pickedMap.values()).flat();
+  const lower = new Map(all.map(f=>[f, norm(f.name)]));
+  const pickOne = (slot, matches)=> matches.sort((a,b)=> a.lastModified - b.lastModified).slice(-1)[0];
+
+  const parts = []; const lines = [];
+  const nameNorm = f => lower.get(f);
+
+  let chosenThankYou = null; let chosenAmort = null;
+
+  for(const slot of CLIENT_PKG_ORDER){
+    const label = DISPLAY_NAMES[slot] || slot.replace(/\b\w/g,c=>c.toUpperCase());
+    const keys = [slot, ...(SYNONYMS[slot]||[])].map(norm);
+    let matches = all.filter(f => keys.some(k => nameNorm(f).includes(k)));
+    if(slot==='cost of credit'){
+      const cobRe = /(?<![a-z])cob(?![a-z])|\bcost[\s_-]*of[\s_-]*(?:borrowing|credit)\b/i;
+      matches = matches.filter(f=> cobRe.test(nameNorm(f)) && !/(form 10|form10|compensation|to lender)/i.test(nameNorm(f)) );
+    }
+    if(slot==='form 10 only') matches = matches.filter(f=> !/to lender/i.test(nameNorm(f)) );
+
+    const chosen = pickOne(slot, matches);
+    if(chosen){
+      // avoid accidental duplicates inside Client Package
+      if(!parts.find(p=>p.name===chosen.name)){
+        parts.push(chosen); lines.push(`${label}: ${chosen.name}`);
+      } else {
+        lines.push(`${label}: ${chosen.name} (deduped)`);
+      }
+      if(slot==='thank you') chosenThankYou = chosen;
+      if(slot==='amortization') chosenAmort = chosen;
+    } else { lines.push(`${label}: MISSING`); }
+  }
+
+  const cover = await makeSummaryPDF('Client Closing Package', lines);
+  const outName = folderPrefix()+" - Closing Package (for Client).pdf";
+  await mergePDFs(parts, cover, outName, !!dirHandle);
+
+  if(dirHandle){
+    const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+    await writeFile(fd2, `_summary_client_package.pdf`, cover);
+    for(const f of [chosenThankYou, chosenAmort]){ if(f) await moveFileToFD2ByName(f.name); }
+  }
+  log('Client Closing Package ready.');
+}
+
+async function downloadFD2Zip(){
+  try {
+    log('Preparing Funding Docs 2.zip ...');
+    const zip = new JSZip();
+    if(dirHandle){
+      const fd2 = await ensureDir(dirHandle, 'Funding Docs 2');
+      // Natural-sort by name for audit sanity
+      const files = [];
+      for await (const [name, handle] of fd2.entries()){
+        if(handle.kind==='file'){
+          const file = await handle.getFile();
+          files.push(file);
+        }
+      }
+      files.sort((a,b)=>{ const ak=natKey(a.name), bk=natKey(b.name); for(let i=0;i<Math.max(ak.length,bk.length);i++){ if(ak[i]==null) return -1; if(bk[i]==null) return 1; if(ak[i]<bk[i]) return -1; if(ak[i]>bk[i]) return 1; } return 0; });
+      for(const f of files){ const buf = await f.arrayBuffer(); zip.file(f.name, buf); }
+      const blob = await zip.generateAsync({type:'blob'});
+      const outName = folderPrefix()+" - Funding Docs 2.zip";
+      await writeFile(dirHandle, outName, blob);
+      log('Saved directly: ' + outName);
+    } else {
+      const v = listCandidates();
+      const dir = zip.folder('Funding Docs 2');
+      const usedSet = new Set(v.resUsed);
+      for(const f of usedSet){ const buf = await f.arrayBuffer(); dir.file(f.name, buf); }
+      const blob = await zip.generateAsync({type:'blob'});
+      downloadBlob(blob, folderPrefix()+" - Funding Docs 2.zip");
+      log('ZIP ready (download).');
+    }
+  } catch(e){ console.error(e); log('ZIP error: ' + (e?.message || e)); }
+}
+
+async function runAll(){
+  try {
+    if(pickedFiles.length===0){ log('No PDFs selected.'); return; }
+    // Disable FS button when unsupported
+    if(!('showDirectoryPicker' in window)){
+      const b = document.getElementById('grantFs');
+      if(b){ b.disabled = true; b.title = 'Use Chrome/Edge for write mode'; }
+    }
+    log('Running all steps...');
+    await buildClosing(); await sleep(800);
+    await buildFunding1(); await sleep(800);
+    await buildClientPkg(); await sleep(400);
+    await downloadFD2Zip();
+    log('All steps completed. If multiple files didn\'t appear, allow multiple downloads for this site.');
+  } catch(e) { console.error(e); log('Run All error: ' + (e?.message || e)); }
+}
+
+// ======= UI Events =======
+$('#pick').addEventListener('change', (e)=>{ indexFiles(e.target.files); const v=listCandidates(); renderSlots(v); setActionsEnabled(pickedFiles.length>0); });
+$('#scanBtn').addEventListener('click', ()=>{ if(pickedFiles.length===0) return; const v=listCandidates(); renderSlots(v); log('Analysis updated.'); });
+$('#grantFs').addEventListener('click', grantFolderAccess);
+$('#buildClosing').addEventListener('click', buildClosing);
+$('#buildFunding1').addEventListener('click', buildFunding1);
+$('#buildClientPkg').addEventListener('click', buildClientPkg);
+$('#zipFD2').addEventListener('click', downloadFD2Zip);
+$('#runAll').addEventListener('click', runAll);
+
+function setActionsEnabled(enabled){
+  ['buildClosing','buildFunding1','buildClientPkg','zipFD2','runAll'].forEach(id=>{ const b=$('#'+id); if(b) b.disabled = !enabled; });
+}
+
+// Drag & drop folder support (Chrome-based)
+window.addEventListener('dragover', e=>{ e.preventDefault(); });
+window.addEventListener('drop', e=>{
+  e.preventDefault();
+  const items = e.dataTransfer.items; if(!items) return;
+  const entries = [];
+  for(const it of items){ const entry = it.webkitGetAsEntry?.(); if(entry) entries.push(entry); }
+  const promises = entries.map(entry => new Promise(res=>{
+    const acc = [];
+    const walk = (ent, path='')=>{
+      if(ent.isFile){ ent.file(f=>{ f.webkitRelativePath = path + f.name; acc.push(f); }, ()=>{}); }
+      else if(ent.isDirectory){ const reader = ent.createReader(); reader.readEntries(ents=>{ ents.forEach(ch=> walk(ch, path + ent.name + '/')); }, ()=>{}); }
+    };
+    walk(entry); setTimeout(()=> res(acc), 300);
+  }));
+  Promise.all(promises).then(groups=>{ const all = groups.flat(); indexFiles(all); const v=listCandidates(); renderSlots(v); setActionsEnabled(pickedFiles.length>0); });
+});
