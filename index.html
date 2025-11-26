@@ -8,19 +8,19 @@
   <link rel="stylesheet" href="assets/css/styles.css" />
 </head>
 <body>
-  <header>
-    <div class="header-wrap">
-      <img class="logo" src="assets/images/hh-logo.png" alt="House & Home Mortgage Co. logo" onerror="this.style.display='none'">
-      <div>
-        <h1>HH – Browser PDF Compiler <span class="small">(No Upload)</span></h1>
-        <div class="sub">Light, fast, and private: compile lender/client PDFs in your browser. Nothing is uploaded.</div>
-        <div class="helper">3 simple steps: 1) Choose folder 2) Review 3) Run All. Optional: enable write access to auto-organize.</div>
-      </div>
-    </div>
-  </header>
-
   <main>
+    <!-- Brand/header now inside the main container -->
     <div class="panel">
+      <div class="header-wrap">
+        <img class="logo" src="assets/images/hh-logo.png" alt="House & Home Mortgage Co. logo" onerror="this.style.display='none'">
+        <div>
+          <h1>HH – Browser PDF Compiler <span class="small">(No Upload)</span></h1>
+          <div class="sub">Light, fast, and private: compile lender/client PDFs in your browser. Nothing is uploaded.</div>
+          <div class="helper">3 simple steps: 1) Choose folder 2) Review 3) Run All. Optional: enable write access to auto-organize.</div>
+        </div>
+      </div>
+
+      <!-- Step 1 lives in the same container as the header now -->
       <div class="step"><span class="num">1</span><div class="title">Choose your client folder</div></div>
       <div class="row">
         <label class="btn" for="pick">📁 Select Folder of PDFs</label>
@@ -32,6 +32,7 @@
       <div class="helper">Tip: On Chrome/Edge, click <b>Grant Local Folder Access</b> to auto-save, create <em>Funding Docs 2</em>, and move used files. Otherwise you’ll get downloads.</div>
     </div>
 
+    <!-- Step 2 & 3 panel (unchanged structurally) -->
     <div class="panel grid">
       <div>
         <div class="step"><span class="num">2</span><div class="title">Review what the app found</div></div>
